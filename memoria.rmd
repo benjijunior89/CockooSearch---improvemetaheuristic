@@ -1,0 +1,629 @@
+---
+title: |
+  | Cuckoo Search basado en vuelos Lévy
+  | Metaheurísticas - UGR
+  
+author: |
+  | José Carlos Martínez Velázquez - jcarlosmv@correo.ugr.es
+  | Benjamín Vega Herrera - benjaminvh@correo.ugr.es
+  
+date: "Julio de 2016"
+output: 
+  pdf_document:
+    toc: true
+    toc_depth: 4
+---
+
+\newpage
+
+##Introducción.
+
+Cuckoo Search es una técnica de optimización de funciones propuesta por Xin-she Yang and Suash Deb en el año 2009. La técnica intenta modelar e imitar el comportamiento parasitario de los cucos. Los cucos son aves que ponen huevos en nidos ajenos para que sus polluelos sean criados por otras especies. Existe una probabilidad de que el ave anfitrión descubra el huevo del cuco y se deshaga de él.
+
+La metaheurística modela este comportamiento, con movimientos aleatorios por el espacio de búsqueda (Lévy flights), probabilidad de descubrimiento (pD) y numero de nidos parasitados (nN). Estos son los parámetros básicos, pero no son los únicos. Más adelante veremos algunos parámetros avanzados que nos permitirán controlar otros conceptos. Propondremos mejoras al algoritmo y nuevos parámetros para controlarlas.
+
+Finalmente analizaremos la técnica optimizando algunas funciones y evaluando su comportamiento.
+
+##Explicación en profundidad de la técnica.
+
+Para analizar en profundidad la técnica tal y como la propusieron los autores en su artículo original $[1]$, vamos a visualizar el pseudocódigo que propone: 
+
+\begin{figure}[!ht]
+  \centering
+    \includegraphics[width=0.6\textwidth]{PseudocodeYanDeb}\\
+    \small{\textbf{Figura 1.} Pseudocódigo original propuesto por\\ Yan y Deb para Cuckoo search.}
+\end{figure}
+
+
+* Paso 1. Como cualquier técnica de búsqueda, Cuckoo search requiere saber la función objetivo que se pretende maximizar o minimizar.
+
+* Paso 2. Inicialización de la población. Una población consiste en un conjunto de nidos en el que se ha puesto un huevo. Computacionalmente, un nido es una solución $x_i$ del espacio de búsqueda, que tendrá un determinado valor asociado de la función objetivo. Cada nido de la población inicial debería ser evaluado con la función objetivo. El primer parámetro, entonces, a determinar del algoritmo es el número de nidos de que se compone la población. 
+
+* Paso 3. Evolución de la población. Vamos a evolucionar la población inicial mediante los pasos descritos a continuación. El algoritmo terminará cuando se alcancen un número máximo de generaciones, evaluaciones o cualquier otro criterio de parada que se quiera establecer.
+  
+    + Paso 3.1. Obtener un nuevo nido (fuera de la población) mediante vuelos de Lévy (_Lévy flights_) y obtener su valor de fitness (valor de la función objetivo asociado a la solución $x_i$). Esta es la parte innovadora de la técnica, pues sin este paso, el algoritmo sería uno más. Dedicaremos un apartado sólo para explicar el modelo matemático de los vuelos de Lévy, pues para entender bien la técnica, se requiere entender muy bien en qué consiste realizar un vuelo de Lévy. Denotaremos como $F_i$ al valor de fitness asociado a $x_i$.
+    
+    + Paso 3.2. Seleccionaremos aleatoriamente un nido dentro de la población actual, $x_j$. Denotaremos como $F_j$ al valor fitness asociado a $x_j$.
+    
+    + Paso 3.3. Debemos comprobar si $F_i$ es _mejor_ que $F_j$ (depende de si pretendemos maximizar o minimizar la función objetivo). Si es así, en la población inicial hay que reemplazar el nuevo nido encontrado ($x_i$) por el nido seleccionado de entre la población ($x_j$).
+    
+    + Paso 3.4. Para introducir diversidad, entra en juego la probabilidad de descubrimiento (pD). Un descubrimiento significa que el ave anfitriona descubre que el huevo que hay en su nido no es de su especie y, por lo tanto, lo desecha. En el algoritmo, un descubrimiento se traduce en que cada solución tiene una probabilidad pD de desaperecer de la población inicial. Cuando un nido desaparece, el cuco rellena esos huecos poniendo huevos en nuevos nidos, esto es, se generan tantas nuevas soluciones aleatorias como nidos hayan sido descubiertos.
+    
+    + Paso 3.5. Para introducir convergencia, nos quedamos con el mejor nido de la población resultante y volvemos al paso 3.1.
+    
+* Paso 4. Devolver la mejor solución encontrada de entre todas las iteraciones y su valor de fitness.
+
+
+###Vuelos de Lévy (Lévy Flights).
+
+Con esta técnica, el autor pretende modelar matemáticamente el comportamiento del cuco cuando busca los nidos que parasitar. El aspecto que más influye en la búsqueda (por no decir el único) es el vuelo del cuco, es decir, la trayectoria que sigue desde un nido al siguiente. El autor se dió cuenta que el cuco sigue un comportamiento conocido, similar al de los depredadores como el tiburón, que consiste en hacer giros repentinos aleatorios. La técnica Lévy Flights es una mejora de la técnica Random Walks, que a su vez se basa en los movimientos Brownianos. Un ejemplo de este tipo de movimientos, lo podemos ver en [3], donde nos explican en qué consisten y por qué los números aleatorios que intervienen provienen de distribuciones normales de probabilidad.
+
+Veamos un ejemplo completo de una trayectoria con vuelos de Lévy, donde el cuco pone 10000 huevos (se buscan 10000 soluciones aleatorias).
+
+```{r echo=FALSE, eval=TRUE, fig.align='center', fig.width=4, fig.height=4}
+set.seed(199)
+xbest<-c(3,4)
+iterations<-10000
+points<-matrix(ncol=2,nrow=iterations)
+
+points[1,1]<-0
+points[1,2]<-0
+
+lambda=2
+epsilon=0.001
+beta<-2/3
+sigma<-(gamma(1.0+beta)*sin((pi*beta)/2))/(gamma(((1.0+beta)/2) * beta * 2^((beta-1.0)/2)))
+
+for(i in 2:iterations){
+  u<-rnorm(1,mean=0,sd=sigma)
+  v<-rnorm(1,mean=0,sd=1)
+  
+  step <- u / (abs(v)^(-lambda))
+  
+  nu<-epsilon*step*(points[i-1,]-xbest)  
+
+  nuGamma<-nu*rnorm(2,mean=0,sd=1)
+  
+  points[i,]<-points[i-1,]+nuGamma
+}
+
+
+
+
+
+
+
+showNests<-FALSE
+
+plot(points[,1],points[,2],type="l", main="Ejemplo Levy Flights", xlab="x", ylab="y")
+if(showNests){
+  for(i in 2:nrow(points)){
+    points(points[i,1],points[i,2],col=i,cex=0.3)
+  }
+}
+
+points(points[1,1],points[1,2],col="red", pch=4,  cex=2, lwd=2)
+points(points[nrow(points),1],points[nrow(points),2],col="blue", pch=4,  cex=2, lwd=2)
+```
+
+En el gráfico podemos ver desde donde parte el cuco en la iteración 0 (aspa roja) y dónde acaba las 10000 iteraciones (aspa azul). La línea negra describe la trayectoria del vuelo del cuco durante la puesta de huevos (búsqueda de soluciones).
+
+Veamos cómo conseguir ésto matemáticamente. Supongamos que en el instante $i$ del algoritmo, el cuco está situado en una posición $P_i$, donde $P_i$ es una solución. El objetivo de un vuelo de Lévy es saber la posición dónde debe estar el cuco en el instante $j=i+1$, que llamaremos $P_j$.
+
+Para que el algoritmo nos diga a qué posición debería moverse el cuco necesitamos saber dos cosas: $P_i$, que como dijimos antes es la posición en la que el cuco se encuentra en el instante $i$ y la mejor solución encontrada hasta el momento $P_{best}$.
+
+Para situarnos, diremos rápidamente que la siguiente solución a una actual viene dada por la siguiente expresión:
+
+$$P_{i+1}=P_i + \varepsilon \oplus levy(\lambda)$$
+
+Donde $\varepsilon$, es una cantidad que nos permite, de algún modo, discretizar el espacio de búsqueda y controlar el tamaño de un salto de un valor a otro. El valor de $\varepsilon$ debería variar en cada problema, pero usualemente está entre $0.001$ y $0.01$. La variable $\lambda$ es la que describe la distribución de probabilidad de Lévy, y debe cumplirse que $1 < \lambda \leq 3$. El símbolo $\oplus$ indica que $\varepsilon$ se multiplica a cada componente del vector generado por la distribución levy, es decir, $levy(\lambda)$ es un vector del mismo tamaño que una solución cuyos componentes están generados por una distribución de probabilidad Lévy.
+
+Vamos a ampliar esta laxa definición paso a paso y en profundidad, describiendo un procedimiento que nos permita encontrar la posición $P_j$ a partir de una posición $P_i$ a través de un vuelo de Lévy. 
+
+Los aspectos comunes (que pueden ser hechos una sola vez) a cualquier posición generada son las distribuciones normales de probabilidad. Una distribución normal de probabilidad está descrita por una media ($\mu$) y una desviación estándar ($sigma$), es decir, $\mathcal{N}(\mu,\sigma)$. El procedimiento de los vuelos de Lévy genera dos coeficientes:
+
+* $v$: número aleatorio procedente de una normal $\mathcal{N}(0,1)$
+* $u$: número aleatorio procedente de una normal $\mathcal{N}(0,\hat{\phi})$
+
+Donde:
+
+$$\hat{\phi}=\left(
+  \frac{\Gamma(1+\hat{\beta}) \cdot sin\left(\frac{\pi\hat{\beta}}{2}\right)}
+  {
+  \Gamma\left(
+    \left(
+      \frac{(1+\hat{\beta})}{2}
+    \right)
+    \cdot
+    \hat{\beta}
+    \cdot
+    2^{\frac{(\hat{\beta}-1)}{2}}
+  \right)
+  }
+\right)^{\frac{1}{\hat{\beta}}}$$
+
+
+En esta expresión tenemos que $\Gamma$ es una función de la que podemos saber más en [4], básicamente $\Gamma(n)=(n-1)!$. La constante $\hat{\beta}=\frac{3}{2}$, según el artículo original del autor.
+
+Una vez calculadas $u$ y $v$, podemos calcular el paso ($\zeta$) como:
+
+$$\zeta=\frac{u}{|v|^{-\lambda}}$$
+
+
+Conocido el paso, ahora deberíamos computar la longitud del paso ($\eta$) así:
+
+$$\eta= \varepsilon \cdot \zeta \cdot (P_i - P_{best})$$
+
+Finalmente, podemos obtener $P_j=P_{i+1}$ como sigue:
+
+$$P_j=P_i + \eta \cdot \Upsilon$$
+
+Donde $\Upsilon$ es un vector aleatorio del mismo tamaño que una solución que sigue una distribución de probabilidad normal $\mathcal{N}(0,1)$.
+
+En el ejemplo anterior, estos son todos los huevos que habría puesto el cuco (soluciones propuestas) mediante vuelos de Lévy en 10000 iteraciones.
+
+```{r echo=FALSE, eval=TRUE, fig.align='center', fig.width=4, fig.height=4}
+set.seed(199)
+xbest<-c(3,4)
+iterations<-10000
+points<-matrix(ncol=2,nrow=iterations)
+
+points[1,1]<-0
+points[1,2]<-0
+
+lambda=2
+epsilon=0.001
+beta<-2/3
+sigma<-(gamma(1.0+beta)*sin((pi*beta)/2))/(gamma(((1.0+beta)/2) * beta * 2^((beta-1.0)/2)))
+
+for(i in 2:iterations){
+  u<-rnorm(1,mean=0,sd=sigma)
+  v<-rnorm(1,mean=0,sd=1)
+  
+  step <- u / (abs(v)^(-lambda))
+  
+  nu<-epsilon*step*(points[i-1,]-xbest)  
+  
+  nuGamma<-nu*rnorm(2,mean=0,sd=1)
+  
+  points[i,]<-points[i-1,]+nuGamma
+}
+
+
+showNests<-TRUE
+
+plot(points[,1],points[,2],type="l", main="Ejemplo Levy Flights", xlab="x", ylab="y",lwd=0.25)
+if(showNests){
+  for(i in 2:nrow(points)){
+    points(points[i,1],points[i,2],col=i,cex=0.3)
+  }
+}
+
+#points(points[1,1],points[1,2],col="red", pch=4,  cex=2, lwd=2)
+#points(points[nrow(points),1],points[nrow(points),2],col="blue", pch=4,  cex=2, lwd=2)
+
+
+```
+
+
+##Estudio experimental del algoritmo original
+
+En primer lugar veamos la relación diversidad/convergencia del algoritmo. Elegiremos una función al azar de entre las 30 de la competición CEC 2014 y evaluaremos este aspecto.
+
+```{r echo=FALSE, eval=TRUE, fig.align='center', fig.width=4, fig.height=4}
+plot(
+  c(5.51356e+08,1.44645e+08,1.44645e+08,1.44645e+08,1.2397e+08,6.9107e+07,6.9107e+07,6.9107e+07,6.9107e+07,6.9107e+07,6.9107e+07,6.9107e+07,6.9107e+07,6.9107e+07,6.9107e+07,6.9107e+07,6.9107e+07,6.9107e+07,6.9107e+07,6.9107e+07,6.9107e+07,2.21166e+07,2.21166e+07,2.21166e+07,2.21166e+07,2.21166e+07,2.21166e+07,2.21166e+07,2.21166e+07,2.21166e+07,2.21166e+07,2.21166e+07,2.21166e+07,2.21166e+07,2.21166e+07,2.21166e+07,2.21166e+07,2.21166e+07,2.21166e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07,1.72162e+07),
+  xlab="x",ylab="y", type="l", lwd=2, col="blue",
+  main="Div./conv. Cuckoo Search V.original")
+```
+
+Como podemos comprobar, el algoritmo no va a tener buenos resultados en la competición y estará lejos de ser competitivo, pues tiene una convergencia extremadamente rápida. Habrá que esforzarse en mejorar este aspecto. 
+
+En apartados posteriores veremos cómo se desenvuelve el algoritmo original con las funciones de la competición CEC2014. Recordemos que hemos vaticinado que no va a tener un gran comportamiento debido a su rapidísima convergencia.
+
+
+##Mejoras realizadas
+
+###Versión 2
+
+Vimos como el algoritmo anterior no conseguía en ocasiones buenas soluciones. Aún no pretendemos enfrentarnos al equilibrio diversidad/convergencia, sino obtener buenas soluciones.
+
+Como experiencia previa, en la última práctica de la asignatura Metaheurísticas, nos enfrentamos a tres versiones de algoritmos meméticos cuyo análisis determinó que era mejor aplicar búsqueda local al $10\%$ de las mejores soluciones que teníamos. La búsqueda local que usaremos tiene que usar el valor de $\varepsilon$ descrito en los vuelos de Lévy para tratar de discretizar el espacio. En este momento la búsqueda local se moverá positiva o negativamente en cada dimensión para tratar de mejorar la posición actual. Evidentemente, al ser optimización continua, necesita muchas evaluaciones para converger a un óptimo, lo que sería un suicidio teniendo un máximo de evaluaciones. Lo que haremos será aplicar búsqueda local "un poquito" al mejor individuo de la población, como máximo un 10\% de las evaluaciones.
+
+```{r echo=FALSE, eval=TRUE, fig.align='center', fig.width=4, fig.height=4}
+#GRAF. D/C V2
+plot(
+  c(1.15951e+09,1.15951e+09,1.15415e+09,7.34176e+08,7.03304e+08,6.75017e+08,6.49309e+08,5.41686e+08,5.23786e+08,5.06533e+08,4.89925e+08,3.99503e+08,3.91e+08,2.86943e+08,2.72468e+08,2.60578e+08,2.51272e+08,2.44551e+08,2.40415e+08,2.38863e+08,2.385e+08,2.38112e+08,2.37727e+08,2.37345e+08,2.36965e+08,2.36587e+08,2.36212e+08,2.35839e+08,2.35468e+08,2.351e+08,2.34734e+08,2.34371e+08,2.3401e+08,2.33651e+08,2.33294e+08,2.32941e+08,2.32589e+08,2.3224e+08,2.31893e+08,2.31549e+08,2.31206e+08,2.30867e+08,2.30529e+08,2.30195e+08,2.29862e+08,2.29532e+08,2.29204e+08,2.28879e+08,2.28556e+08,2.28235e+08,2.27917e+08),
+  xlab="x",ylab="y", type="l", lwd=2, col="blue",
+  main="Div./conv. Cuckoo Search V2")
+```
+
+
+Observando la gráfica de diversidad/convergencia, vemos cómo la version 2 logra retrasar un poco la convergencia, esto es, meter un poco de diversidad pero empeora la convergencia, pues no llega tan al fondo como la versión original.
+
+###Versión 3
+
+Para intentar mejorar la falta que cometía la versión 2, vamos a llevar al extremo el elitismo. La probabilidad de descubrimiento puede eliminar soluciones prometedoras (aunque sean malas), vamos a considerar prometedoras sólo a las mejores, de manera que los mejores individuos puedan repetirse. Esto, teóricamente mejoraría la convergencia, en detrimento de la diversificación.
+
+```{r echo=FALSE, eval=TRUE, fig.align='center', fig.width=4, fig.height=4}
+#GRAF. D/C V3
+plot(
+c(4.15431e+08,4.15431e+08,3.96762e+08,3.80677e+08,3.67177e+08,3.56262e+08,3.47931e+08,3.42185e+08,2.7964e+08,2.6829e+08,2.57586e+08,2.47528e+08,2.38116e+08,2.29351e+08,2.21232e+08,2.13759e+08,6.04459e+07,5.88419e+07,5.78841e+07,5.75717e+07,5.75391e+07,5.75089e+07,5.7481e+07,5.74556e+07,5.74325e+07,5.74118e+07,5.73934e+07,5.73775e+07,5.73639e+07,5.73527e+07,5.73439e+07,5.73374e+07,5.73333e+07,5.73317e+07,5.65981e+07,5.56997e+07,5.48308e+07,5.39911e+07,5.31808e+07,5.23999e+07,5.16483e+07,5.0926e+07,5.02331e+07,4.95695e+07,4.89353e+07,4.83304e+07,4.77549e+07,4.72087e+07,4.66918e+07,4.62043e+07,4.57462e+07),
+  xlab="x",ylab="y", type="l", lwd=2, col="blue",
+  main="Div./conv. Cuckoo Search V3")
+```
+
+Viendo la gráfica de diversidad/convergencia podemos ver que esta versión del algoritmo llega más al fondo que la versión 2. Ahora bien, no es oro todo lo que reluce. En la gráfica podemos apreciar cómo llega un momento en que la convergencia se produce radicalmente, esto seguramente se haya producido cuando hay un montón de individuos repetidos en la población.
+
+###Versión 4
+
+Para evitar el problema de los individuos repetidos, vamos a olvidar de la versión 3 y partiremos de la versión 2. La versión 4 va a introducir la reinicialización de la población. Para introducir convergencia, no lo haremos mediante un contador de generaciones, sino mediante una probabilidad de reinicialización. Recordemos que siempre guardamos la solución más prometedora, entonces siempre deberíamos partir de un mínimo de calidad.
+
+```{r echo=FALSE, eval=TRUE, fig.align='center', fig.width=4, fig.height=4}
+#GRAF D/C V4
+plot(
+c(
+  3.80948e+08,3.80948e+08,1.73015e+08,1.71357e+08,1.69724e+08,1.68118e+08,1.66537e+08,1.64982e+08,1.63453e+08,1.6195e+08,1.60472e+08,1.59021e+08,1.57595e+08,1.56195e+08,1.54821e+08,1.53473e+08,1.52151e+08,1.50854e+08,1.49584e+08,1.48339e+08,1.4712e+08,1.45927e+08,1.4476e+08,1.43619e+08,1.42503e+08,1.41413e+08,1.40349e+08,1.39311e+08,1.38299e+08,1.37313e+08,1.36353e+08,1.35418e+08,1.34509e+08,1.33626e+08,1.32769e+08,1.31938e+08,1.31938e+08,1.31133e+08,1.31133e+08,1.30353e+08,1.30353e+08,1.29599e+08,1.28872e+08,1.2817e+08,1.2817e+08,1.27494e+08,1.26843e+08,1.26219e+08,1.2562e+08,1.25047e+08,1.24501e+08,1.23979e+08,1.23484e+08,1.23015e+08,1.22571e+08,1.22154e+08,1.21762e+08,1.21762e+08,1.21396e+08,1.21056e+08,1.20741e+08,1.20453e+08,1.2019e+08,1.19954e+08,1.19743e+08,1.19743e+08,1.19558e+08,1.19398e+08,1.19265e+08,1.19158e+08,1.19076e+08,1.19076e+08,1.19076e+08,1.1902e+08,1.1902e+08,1.1899e+08,1.18977e+08,1.18953e+08,1.1893e+08,1.18907e+08,1.18884e+08,1.1886e+08,1.18837e+08,1.18814e+08,1.18791e+08,1.18768e+08,1.18745e+08,1.18722e+08,1.18699e+08,1.18676e+08,1.18653e+08,1.1863e+08,1.18607e+08,1.18584e+08,1.18561e+08,1.18538e+08,1.18515e+08,1.18493e+08,1.1847e+08,1.18447e+08,1.18424e+08,1.18402e+08,1.18379e+08,1.18356e+08,1.18334e+08,1.18311e+08,1.18288e+08,1.18266e+08,1.18243e+08,1.18221e+08,1.18198e+08,1.18176e+08,1.18153e+08,1.18131e+08,1.18108e+08,1.18086e+08,1.18064e+08,1.18041e+08,1.18019e+08,1.17997e+08,1.17975e+08,1.17952e+08,1.1793e+08,1.17908e+08,1.17886e+08,1.17864e+08,1.17842e+08,1.17819e+08,1.17797e+08,1.17775e+08,1.17753e+08,1.17731e+08,1.17709e+08,1.17709e+08,1.17687e+08,1.17665e+08,1.17644e+08,1.17622e+08,1.176e+08,1.176e+08,1.176e+08,1.17578e+08,1.17556e+08,1.17534e+08,1.17513e+08,1.17491e+08,1.17469e+08,1.17447e+08,1.17426e+08,1.17404e+08,1.17383e+08,1.17361e+08,1.17339e+08,1.17318e+08,1.17296e+08,1.17296e+08,1.17275e+08,1.17253e+08,1.17232e+08,1.17232e+08,7.71444e+07,7.58045e+07,7.44905e+07,7.32023e+07,7.19399e+07,7.07034e+07,6.94928e+07,6.8308e+07,6.7149e+07,6.60159e+07,6.49087e+07,6.38272e+07,6.27717e+07,6.1742e+07,6.07381e+07,5.976e+07,5.88079e+07,5.88079e+07,5.78815e+07,5.78815e+07,5.6981e+07,5.61064e+07,5.52576e+07,5.44346e+07,5.44346e+07,5.36375e+07,5.28663e+07,5.21208e+07,5.14013e+07,5.07076e+07,5.00397e+07,4.93977e+07,4.87815e+07,4.81911e+07,4.76267e+07,4.7088e+07,4.65752e+07,4.60883e+07,4.56272e+07,4.51919e+07,4.47825e+07,4.43989e+07,4.40412e+07,4.37094e+07,4.34033e+07,4.31232e+07,4.28688e+07,4.26403e+07,4.24377e+07,4.22609e+07,4.211e+07,4.19849e+07,4.18856e+07,4.18122e+07,4.17646e+07,4.17429e+07,4.17293e+07,4.17109e+07,4.16926e+07,4.16742e+07,4.16559e+07,4.16375e+07,4.16192e+07,4.16009e+07,4.15826e+07,4.15643e+07,4.15461e+07,4.15278e+07,4.15278e+07,4.15096e+07,4.14914e+07,4.14731e+07,4.14549e+07,4.14368e+07,4.14186e+07,4.14004e+07,4.13823e+07,4.13642e+07,4.13461e+07,4.1328e+07,4.13099e+07,4.12918e+07,4.12737e+07,4.12557e+07,4.12377e+07,4.12196e+07,4.12016e+07,4.11836e+07,4.11657e+07,4.11477e+07,4.11298e+07,4.11118e+07,4.10939e+07,4.1076e+07,4.1076e+07,4.10581e+07,4.10402e+07,4.10223e+07,4.10045e+07,4.09867e+07,4.09688e+07,4.0951e+07,4.09332e+07,4.09332e+07,4.09332e+07,4.09154e+07,4.08977e+07,4.08799e+07,4.08622e+07,4.08444e+07,4.08267e+07,4.0809e+07,4.0809e+07,4.07913e+07,4.07737e+07,4.0756e+07,4.07383e+07,4.07207e+07,4.07031e+07,4.06855e+07,4.06679e+07,4.06503e+07,4.06328e+07,4.06152e+07,4.05977e+07,4.05801e+07,4.05626e+07,4.05451e+07,4.05451e+07,4.05277e+07,4.05102e+07,4.04927e+07,4.04753e+07,4.04579e+07,4.04405e+07,4.04405e+07,4.04231e+07,4.04057e+07,4.03883e+07,4.03709e+07,4.03536e+07,4.03363e+07,4.03189e+07,4.03016e+07,4.02843e+07,4.02671e+07,4.02671e+07,4.02498e+07,4.02326e+07,4.02153e+07,4.01981e+07,4.01981e+07,4.01809e+07,4.01637e+07,4.01465e+07,4.01294e+07,4.01122e+07,4.00951e+07,4.00951e+07,4.00779e+07,4.00608e+07,4.00437e+07,4.00267e+07,4.00096e+07,3.99925e+07,3.99755e+07,3.99585e+07,3.99414e+07,3.99244e+07,3.99075e+07,3.98905e+07,3.98735e+07,3.98566e+07,3.98396e+07,3.98227e+07,3.98058e+07,3.97889e+07,3.9772e+07,3.97552e+07,3.97383e+07,3.97215e+07,3.97047e+07,3.96879e+07,3.96879e+07,3.96711e+07,3.96543e+07,3.96375e+07,3.96208e+07,3.9604e+07,3.95873e+07,3.95706e+07,3.95539e+07,3.95372e+07,3.95205e+07,3.95039e+07,3.94872e+07,3.94706e+07,3.94706e+07,3.9454e+07,3.94374e+07,3.94208e+07,3.94042e+07,3.93877e+07,3.93711e+07,3.93546e+07,3.93381e+07,3.93216e+07,3.93051e+07,3.93051e+07,3.92886e+07,3.92721e+07,3.92557e+07,3.92392e+07,3.92228e+07,3.92064e+07,3.919e+07,3.91736e+07,3.91572e+07,3.91409e+07,3.91245e+07,3.91082e+07,3.90919e+07,3.90756e+07,3.90756e+07,3.90593e+07,3.9043e+07,3.90268e+07,3.90105e+07,3.89943e+07,3.89781e+07,3.89619e+07,3.89457e+07,3.89295e+07,3.89134e+07,3.88972e+07,3.88811e+07,3.8865e+07,3.88488e+07,3.88488e+07,3.88327e+07,3.88167e+07,3.88006e+07,3.87845e+07,3.87685e+07,3.87525e+07,3.87365e+07,3.87205e+07,3.87045e+07,3.86885e+07,3.86726e+07,3.86566e+07,3.86407e+07,3.86248e+07,3.86089e+07,3.8593e+07,3.8593e+07,3.8593e+07,3.85771e+07,3.85613e+07,3.85454e+07,3.85296e+07,3.85296e+07,3.85138e+07,3.84979e+07,3.84822e+07,3.84664e+07,3.84506e+07,3.84349e+07,3.84191e+07,3.84034e+07,3.84034e+07,3.83877e+07,3.8372e+07,3.83563e+07,3.83406e+07,3.8325e+07,3.83094e+07,3.82937e+07,3.82937e+07,3.82781e+07,3.82625e+07,3.82469e+07,3.82314e+07,3.82158e+07,3.82003e+07,3.81847e+07,3.81692e+07,3.81537e+07,3.81537e+07,3.81382e+07,3.81227e+07,3.81073e+07,3.80918e+07,3.80918e+07,3.80764e+07,3.8061e+07,3.80456e+07,3.80456e+07,3.80302e+07,3.80148e+07,3.79994e+07,3.79841e+07,3.79687e+07,3.79534e+07,3.79381e+07,3.79228e+07,3.79075e+07,3.78922e+07,3.7877e+07,3.7877e+07,3.78618e+07,3.78465e+07,3.78313e+07,3.78161e+07,3.78009e+07,3.77857e+07,3.77857e+07,3.77857e+07,3.77706e+07,3.77554e+07,3.77403e+07,3.77252e+07,3.77101e+07,3.7695e+07,3.76799e+07
+),  xlab="x",ylab="y", type="l", lwd=2, col="blue",
+  main="Div./conv. Cuckoo Search V4")
+```
+
+En la versión 4 podemos apreciar cómo tenemos diversidad hasta casi el final de las ejecuciones, pero el algoritmo no permite empeorar, algo que define la diversidad de la población, esto es apreciable en la gráfica con esa especie de mesetas formadas, que era a lo que nos referíamos en el análisis previo con la palabra checkpoint.
+
+###Versión 5
+
+Vamos a tratar de introducir diversidad copiando la principal idea de los algoritmos basados en enjambres de partículas, esto es, la idea de multiagente. Cada agente (cada cuco) hará su búsqueda independiente de los demás, lo que forzosamente debe introducir diversidad. Dado que las evaluaciones han de ser repartidas entre el número total de agentes, la convergencia podría verse afectada. Además de ello, vamos a modificar cuándo se realiza la búsqueda local, que se hará cada 10\% del máximo de evaluaciones. Por ejemplo, si tenemos 100000 evaluaciones como máximo, la búsqueda local se aplicará al mejor individuo de la población cada 10000 evaluaciones.
+
+```{r echo=FALSE, eval=TRUE, fig.align='center', fig.width=4, fig.height=4}
+#GRAF D/C V5
+plot(
+c(9.50713e+08,2.80745e+07,3.96042e+08,1.17522e+07,3.96481e+08,2.54868e+07,7.04441e+08,1.48642e+07,1.0444e+09,1.87385e+07,8.08469e+08,1.25422e+07,5.15971e+08,7.34371e+06,6.38023e+08,1.18206e+07,9.58983e+07,6.21854e+06,3.95494e+08,1.93269e+07),
+  xlab="x",ylab="y", type="l", lwd=2, col="blue",
+  main="Div./conv. Cuckoo Search V5")
+```
+
+En este caso vemos claramente como se ha introducido bastante diversidad, aunque curiosamente, tenemos la misma convergencia que en la versión 4. Debido a la falta de tiempo para poder extender más el estudio, concluímos que esta es la versión más potente de la que podemos disponer y competiremos humildemente con ella.
+
+###Versión 6
+
+De nuevo, por falta de tiempo, esta versión se va a quedar en proyecto. Dado que los algoritmos genéticos tienen buen equilibrio diversidad convergencia, la idea era aplicar lo que conocemos de genéticos aquí.
+
+Podríamos introducir un operador de selección clásico, por torneo. Un operador de cruce de soluciones, basado en corte a dos puntos, intercambiando las partes internas de los individuos. Además el operador de mutación sería cambiar el valor de una dimensión aleatoriamente a un valor en el rango con una determinada probabilidad.
+
+En teoría, si nuestro algoritmo tiene rápida convergencia, esta modificación no tendría, en principio, mala pinta de cara a mejorar los resultados en la competición CEC2014.
+
+VER ANEXO I.
+
+##Resultados con las funciones de CEC2014 y comparación con otros algoritmos
+
+En este apartado vamos a poner las distintas versiones realizadas del algoritmo a optimizar las funciones de la competición CEC2014. Los resultados aquí descritos es una media aritmética obtenida de los resultados de 25 ejecuciones por cada función y versión del algoritmo. Debemos tener en cuenta que la salida esperada para cada función es el número de la función multiplicado por 100. Vamos a verlo.
+
+###Resultados con la versión original
+
+\begin{center}
+\includegraphics[width=0.4\textwidth]{img}\\
+\small{\textbf{Figura 2.} Resultados obtenidos para CuckooSearchAlgorithm.}
+\end{center}
+
+###Resultados con la versión 2
+
+\begin{center}
+\includegraphics[width=0.6\textwidth]{img_v2}\\
+\small{\textbf{Figura 3.} Resultados obtenidos para CuckooSearchAlgorithmV2.}
+\end{center}
+
+###Resultados con la versión 3
+
+\begin{center}
+\includegraphics[width=0.6\textwidth]{img_v3}\\
+\small{\textbf{Figura 4.} Resultados obtenidos para CuckooSearchAlgorithmV3.}
+\end{center}
+
+###Resultados con la versión 4
+
+\begin{center}
+\includegraphics[width=0.6\textwidth]{img_v4}\\
+\small{\textbf{Figura 5.} Resultados obtenidos para CuckooSearchAlgorithmV4.}
+\end{center}
+
+###Resultados con la versión 5
+
+\begin{center}
+\includegraphics[width=0.6\textwidth]{img_v5}\\
+\small{\textbf{Figura 6.} Resultados obtenidos para CuckooSearchAlgorithmV5.}
+\end{center}
+
+Los resultados nos muestran que la versión 5 es, en términos generales, la mejor. Sólo vemos que dicha versión es un poquito peor cuando la comparamos con las demás versiones (excepto con la original) en la optimización de la función 5 en todas las dimensiones. La versión 4, además gana a la versión 5 en la función 12 sólo para dimensión 10. Aunque esto ocurre, no es relevante, pues en las funciones en las que pierde la versión 5 contra sus anteriores versiones, lo hace por pocas unidades (o décimas), sin embargo, donde gana, es hasta 100 veces mejor que sus anteriores versiones, lo que, como comentábamos, convierte a la versión 5 en la mejor de la que disponemos.
+
+Podemos considerar que la versión 5 es un éxito, pues el objetivo de mejorar la propuesta inicial del autor ha sido logrado. Como podemos comprobar, la versión 5 consigue mejores resultados en todas y cada una de las funciones para todas las dimensiones trabajadas que los conseguidos por la versión original del autor.
+
+###Comparación con otros algoritmos
+
+####Comparación con el algoritmo Differential Evolution de Daniel Molina.
+Vamos a ver los resultados obtenidos contra el algoritmo Dif. Evolution de Daniel Molina.
+
+\begin{center}
+\includegraphics[width=0.8\textwidth]{DanMolDim10}\\
+\small{\textbf{Figura 7.} Comparación CSV5 con DE de D. Molina en Dimension 10.}
+\end{center}
+
+\begin{center}
+\includegraphics[width=0.8\textwidth]{DanMolDim30}\\
+\small{\textbf{Figura 8.} Comparación CSV5 con DE de D. Molina en Dimension 30.}
+\end{center}
+
+Lamentablemente, la mejor versión de Cuckoo Search implementada por nosotros no consigue ganarle al algoritmo DE de Daniel Molina. En algún caso nos quedamos cerca (función 5), pero en la mayoría hay diferencias significativas. El algoritmo necesita seguir mejorando para poder ser competitivo.
+
+####Comparación con los algoritmos participantes en la competición CEC2014.
+
+Vamos a ver los resultados obtenidos contra todos los algoritmos participantes en CEC2014.
+
+\begin{center}
+\includegraphics[width=1.1\textwidth]{CEC2014Dim10}\\
+\small{\textbf{Figura 9.} Ranking CSV5 en CEC2014 Dimension 10.}
+\end{center}
+
+
+
+\begin{center}
+\includegraphics[width=1.1\textwidth]{miCompeticionDim10}\\
+\small{\textbf{Figura 10.} Comparación gráfica de los algoritmos en dimensión 10.}
+\end{center}
+
+En dimensión 10, el algoritmo gana a algunas funciones, aunque en términos generales es una cota superior de todos los algoritmos. La línea negra gruesa es nuestro algoritmo y el de color rosa (grueso) es el algoritmo que ganó la competición: L-SHADE. Vamos a analizar en qué posición nos quedaríamos si estuviéramos compitiendo realmente.
+
+|Función  |Posición|
+|:-------:|:------:|
+|F1 | 17|
+|F2 | 17|
+|F3 | 17|
+|F4 | 17|
+|F5 | 17|
+|F6 | 17|
+|F7 | 17|
+|F8 | 17|
+|F9 | 17|
+|F10 | 17|
+|F11 | 17|
+|F12 | 17|
+|F13 | 17|
+|F14 | 17|
+|F15 | 17|
+|F16 | 15|
+|F17 | 15|
+|F18 | 17|
+|F19 | 17|
+|F20 | 14|
+|F21 | 15|
+|F22 | 15|
+|F23 | 17|
+|F24 | 17|
+|F25 | 17|
+|F26 | 17|
+|F27 | 10|
+|F28 | 15|
+|F29 | 17|
+|F30 | 17|
+
+Posición media: $(23\cdot 17 + 5\cdot 15 + 14 + 10)/30 = 16,33$. Hemos quedado últimos en la mayoría de las ocasiones, por ende, quedamos últimos en la competición.
+
+Vamos a ver ahora qué ocurre en dimensión 30.
+
+\begin{center}
+\includegraphics[width=1.1\textwidth]{CEC2014Dim30}\\
+\small{\textbf{Figura 11.} Ranking CSV5 en CEC2014 Dimension 30.}
+\end{center}
+
+
+\begin{center}
+\includegraphics[width=1.1\textwidth]{miCompeticionDim30}\\
+\small{\textbf{Figura 12.} Comparación gráfica de los algoritmos en dimensión 30.}
+\end{center}
+
+En dimensión 30, el algoritmo es un desastre en comparación con los demás participantes en la competición, como podemos ver. Sólo en dos ocasiones batimos al peor que participó en la competición. En color amarillo tenemos nuestro algoritmo y en color azul grueso el ganador L-SHADE.
+
+|Función  |Posición|
+|:-------:|:------:|
+|F1 | 17|
+|F2 | 17|
+|F3 | 17|
+|F4 | 17|
+|F5 | 17|
+|F6 | 17|
+|F7 | 17|
+|F8 | 17|
+|F9 | 17|
+|F10 | 17|
+|F11 | 17|
+|F12 | 17|
+|F13 | 17|
+|F14 | 17|
+|F15 | 17|
+|F16 | 17|
+|F17 | 16|
+|F18 | 17|
+|F19 | 17|
+|F20 | 17|
+|F21 | 16|
+|F22 | 17|
+|F23 | 17|
+|F24 | 17|
+|F25 | 17|
+|F26 | 17|
+|F27 | 17|
+|F28 | 17|
+|F29 | 17|
+|F30 | 17|
+
+Posición media: $(28\cdot 17 + 2 \cdot 16)/30 = 16,93$. Participando en esta dimensión, hubiéramos quedado los últimos.
+
+
+
+##Conclusiones
+
+El algoritmo Cuckoo Search posee una rápida convergencia, lo que supone un inconveniente de cara a salir de óptimos locales. A pesar de los esfuerzos realizados, no hemos sido capaces de hacer cosas importantes en la competición CEC2014, no obstante, hemos conseguido mejorar totalmente el algoritmo propuesto por el autor, pues la versión que pusimos a competir batía en todas las funciones y dimensiones a la versión original. Lamentablemente, dicha versión está en los últimos puestos de la competición y a años luz del ganador. Debemos seguir mejorando. Siempre.
+
+
+
+
+
+\newpage
+
+##Referencias
+
+[1] Cuckoo search via Lévy flights- Yang, Deb - 2009
+
+http://www.cs.tufts.edu/comp/150GA/homeworks/hw3/_reading7%20Cuckoo%20search.pdf
+
+
+
+[2] Akemi Gálvez, Andrés Iglesias, and Luis Cabellos, “Cuckoo Search with Lévy Flights for Weighted Bayesian Energy Functional Optimization in Global-Support Curve Data Fitting,” The Scientific World Journal, vol. 2014, Article ID 138760, 11 pages, 2014. doi:10.1155/2014/138760
+
+http://www.hindawi.com/journals/tswj/2014/138760/#EEq8
+
+
+
+[3] Brownian Motion Animation - mathslug
+
+https://www.youtube.com/watch?v=pdz7wFHSLD0
+
+
+
+[4] Función gamma - Wikipedia
+
+https://es.wikipedia.org/wiki/Funci%C3%B3n_gamma
+
+\newpage
+ ## ANEXO I
+ 
+ Visto que por falta de tiempo no hemos podido incluir esta versión (versión 6) en la memoria, incluimos como anexo lo último que hemos podido mejorar con esta versión.
+ 
+ Como hemos visto antes la versión 6 incluye cruze y mutación como en geneticos para dar diversificación al algoritmo. 
+ Hemos probado varias subversiones:
+      1. Cruzando todos los individuos de la población, por el operador de cruce ....
+      2. Cruzando un porcentaje aleatorio de la población, por el operador de cruce .
+      3. Cruzando los 3 peores de la población con otros elegidos aleatoriamente, por el operador de cruce ...
+      La mutación a sido en cada caso con una probabilidad del 0.01.
+      Tras analizar los resultados obtenidos la mejor subversión ha sido la 1 y en todas la mutación no era relevante por lo que en la versión final no está incluida.
+
+Otra mejora que hemos tenido que hacer es que al es decrementar la frecuencia de uso de la búsqueda local, pasamos de un 10% de las evaluaciones totales al 50%.
+
+###Resultados con la versión 6
+
+\begin{center}
+\includegraphics[width=0.6\textwidth]{img_v6}\\
+\small{\textbf{Figura 13.} Resultados obtenidos para CuckooSearchAlgorithmV6.}
+\end{center}
+
+\begin{center}
+\includegraphics[width=0.6\textwidth]{img_v5_v6}\\
+\small{\textbf{Figura 14.} Comparación entre v5 y v6.}
+\end{center}
+
+Los resultados nos muestran que la versión 6 es algo mejor que la v5. Sólo vemos que dicha versión es un poquito peor cuando la comparamos con la versión 5 en la optimización de las funciónes 10,12,13,14,17,18 y 29 en la dimensión 10 y sólo las funciones 10,13 y 29 en dimensión 30. 
+En todas estas funciones no mejora a la v5 pero en las demás las mejora no demasiado pero podemos subir un poco en la competición, del puesto 16,33 que teníamos al puesto 16,26 en dimensión 10, en dimensión 30 nos quedamos igual.
+
+
+####Veamos resultados en la competición
+
+#####Comparación con el algoritmo Differential Evolution de Daniel Molina.
+Vamos a ver los resultados obtenidos contra el algoritmo Dif. Evolution de Daniel Molina.
+
+\begin{center}
+\includegraphics[width=0.8\textwidth]{DanMolDim10_v6}\\
+\small{\textbf{Figura 14.} Comparación CSV6 con DE de D. Molina en Dimension 10.}
+\end{center}
+
+\begin{center}
+\includegraphics[width=0.8\textwidth]{DanMolDim30_v6}\\
+\small{\textbf{Figura 15.} Comparación CSV6 con DE de D. Molina en Dimension 30.}
+\end{center}
+
+Como vemos seguimos sin mejorar el DE de Daniel Molina.
+
+####Comparación con los algoritmos participantes en la competición CEC2014.
+
+Vamos a ver los resultados obtenidos contra todos los algoritmos participantes en CEC2014.
+
+\begin{center}
+\includegraphics[width=1.1\textwidth]{CEC2014Dim10_v6}\\
+\small{\textbf{Figura 16.} Ranking CSV6 en CEC2014 Dimension 10.}
+\end{center}
+
+
+|Función  |Posición|
+|:-------:|:------:|
+|F1 | 17|
+|F2 | 17|
+|F3 | 17|
+|F4 | 17|
+|F5 | 16|
+|F6 | 17|
+|F7 | 17|
+|F8 | 17|
+|F9 | 17|
+|F10 | 17|
+|F11 | 17|
+|F12 | 17|
+|F13 | 17|
+|F14 | 17|
+|F15 | 17|
+|F16 | 17|
+|F17 | 14|
+|F18 | 16|
+|F19 | 17|
+|F20 | 13|
+|F21 | 15|
+|F22 | 15|
+|F23 | 17|
+|F24 | 17|
+|F25 | 17|
+|F26 | 17|
+|F27 | 9|
+|F28 | 17|
+|F29 | 16|
+|F30 | 17|
+
+Posición media: $(22\cdot 17 + 3\dot 16 + 2\cdot 15 + 14 + 13 + 9)/30 = 16,26$. Hemos quedado últimos en la mayoría de las ocasiones, por ende, quedamos últimos en la competición.
+
+
+\begin{center}
+\includegraphics[width=1.1\textwidth]{CEC2014Dim30_v6}\\
+\small{\textbf{Figura 16.} Ranking CSV6 en CEC2014 Dimension 30.}
+\end{center}
+
+
+|Función  |Posición|
+|:-------:|:------:|
+|F1 | 17|
+|F2 | 17|
+|F3 | 17|
+|F4 | 17|
+|F5 | 17|
+|F6 | 17|
+|F7 | 17|
+|F8 | 17|
+|F9 | 17|
+|F10 | 17|
+|F11 | 17|
+|F12 | 17|
+|F13 | 17|
+|F14 | 17|
+|F15 | 17|
+|F16 | 17|
+|F17 | 16|
+|F18 | 17|
+|F19 | 17|
+|F20 | 17|
+|F21 | 16|
+|F22 | 17|
+|F23 | 17|
+|F24 | 17|
+|F25 | 17|
+|F26 | 17|
+|F27 | 17|
+|F28 | 17|
+|F29 | 17|
+|F30 | 17|
+
+Posición media: $(28\cdot 17 + 2 \cdot 16)/30 = 16,93$. Participando en esta dimensión, hubiéramos quedado también los últimos.
