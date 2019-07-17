@@ -1,0 +1,1 @@
+g++ cuckoSearch.cpp -o cuckosearch -std=c++11
